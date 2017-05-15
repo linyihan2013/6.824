@@ -1,7 +1,10 @@
 package mapreduce
 
 import (
+	"encoding/json"
 	"hash/fnv"
+	"log"
+	"os"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -14,6 +17,43 @@ func doMap(
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(file string, contents string) []KeyValue,
 ) {
+	inputFile, err := os.Open(inFile)
+	if err != nil {
+		log.Fatal("doMap: open input file ", inFile, " error: ", err)
+	}
+	defer inputFile.Close()
+
+	fileInfo, err := inputFile.Stat()
+	if err != nil {
+		log.Fatal("doMap: getstat input file ", inFile, " error: ", err)
+	}
+
+	data := make([]byte, fileInfo.Size())
+	_, err = inputFile.Read(data)
+	if err != nil {
+		log.Fatal("doMap: read input file ", inFile, " error: ", err)
+	}
+
+	KeyValues := mapF(inFile, string(data))
+
+	for i := 0; i < nReduce; i++ {
+		fileName := reduceName(jobName, mapTaskNumber, i)
+		reduceFile, err := os.Create(fileName)
+		if err != nil {
+			log.Fatal("doMap: create intermediate file ", fileName, " error: ", err)
+		}
+		defer reduceFile.Close()
+
+		enc := json.NewEncoder(reduceFile)
+		for _, kv := range KeyValues {
+			if ihash(kv.Key)%nReduce == i {
+				err := enc.Encode(&kv)
+				if err != nil {
+					log.Fatal("doMap: encode error", err)
+				}
+			}
+		}
+	}
 	//
 	// You will need to write this function.
 	//
